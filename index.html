@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Azure GPT-4o-mini Realtime</title>
+</head>
+<body>
+
+<h2>Push-to-talk Voice Bot</h2>
+
+<button id="start">Start</button>
+<button id="stop" disabled>Stop</button>
+
+<div id="text"></div>
+
+<script>
+window.TARGET_SAMPLE_RATE = {{ sample_rate | tojson }};
+</script>
+<script src="/static/client.js"></script>
+
+</body>
+</html>
