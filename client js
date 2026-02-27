@@ -1,0 +1,95 @@
+let ws;
+let audioCtx;
+let processor;
+let stream;
+let playTime = 0;
+
+const TARGET_SR = window.TARGET_SAMPLE_RATE;
+
+function downsampleToPCM16(buffer, inRate, outRate) {
+    const ratio = inRate / outRate;
+    const newLen = Math.floor(buffer.length / ratio);
+    const result = new Int16Array(newLen);
+
+    let offset = 0;
+    for (let i = 0; i < newLen; i++) {
+        const sample = buffer[Math.floor(offset)];
+        const clamped = Math.max(-1, Math.min(1, sample));
+        result[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+        offset += ratio;
+    }
+    return result;
+}
+
+function playPCM16(arrayBuffer) {
+    const int16 = new Int16Array(arrayBuffer);
+    const float32 = new Float32Array(int16.length);
+
+    for (let i = 0; i < int16.length; i++) {
+        float32[i] = int16[i] / 32768;
+    }
+
+    const buffer = audioCtx.createBuffer(1, float32.length, TARGET_SR);
+    buffer.copyToChannel(float32, 0);
+
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+    if (playTime < now) playTime = now;
+
+    src.start(playTime);
+    playTime += buffer.duration;
+}
+
+function connectWS() {
+    ws = new WebSocket("ws://" + location.host + "/ws");
+    ws.binaryType = "arraybuffer";
+
+    ws.onmessage = (event) => {
+        if (typeof event.data === "string") {
+            const msg = JSON.parse(event.data);
+            if (msg.type === "text_delta") {
+                document.getElementById("text").innerText += msg.delta;
+            }
+        } else {
+            playPCM16(event.data);
+        }
+    };
+}
+
+document.getElementById("start").onclick = async () => {
+
+    connectWS();
+    audioCtx = new AudioContext();
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const source = audioCtx.createMediaStreamSource(stream);
+
+    processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+    processor.onaudioprocess = (e) => {
+        const input = e.inputBuffer.getChannelData(0);
+        const pcm = downsampleToPCM16(input, audioCtx.sampleRate, TARGET_SR);
+        ws.send(pcm.buffer);
+    };
+
+    source.connect(processor);
+    processor.connect(audioCtx.destination);
+
+    ws.send(JSON.stringify({ type: "start" }));
+
+    document.getElementById("start").disabled = true;
+    document.getElementById("stop").disabled = false;
+};
+
+document.getElementById("stop").onclick = () => {
+
+    ws.send(JSON.stringify({ type: "stop" }));
+
+    processor.disconnect();
+    stream.getTracks().forEach(t => t.stop());
+
+    document.getElementById("stop").disabled = true;
+    document.getElementById("start").disabled = false;
+};
